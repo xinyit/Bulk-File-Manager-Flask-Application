@@ -14,3 +14,5 @@ Change directory to /application:
 ```cd application```
 Run the application using the following command:
 ```flask run```
+
+![Screenshot](landing_page)
