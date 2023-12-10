@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <link rel="stylesheet" href="../static/styles.css">
+</head>
+
+<body>
+    <div id="fileManager">
+
+        <form id="directoryForm">
+            <input type="text" id="selectedDirectory"  name="selected_directory" placeholder="Enter a directory">
+            <button type="button" onclick="listFiles()">Show Files</button>
+            <br>
+            <span class="checkbox">
+                <input type="checkbox" id="toIncludeSubdirectoriesCheckbox" onchange="listFiles()">
+                <p id="includeSubdirectoriesCheckbox" class="label">Include subdirectories</p>
+            </span>
+        </form>
+
+        <button type="button" class="toggleCollapsible">Show File Modification Options</button>
+        <div class="fileModifications">
+            <span>
+                <label class="labelInverted">Find & replace: </label>
+                <input type="text" id="regexFrom" class="modificationOptionsInput" placeholder="Find">
+                <input type="text" id="regexTo" class="modificationOptionsInput" placeholder="Replace">
+            </span>
+            <br>
+            <span>
+                <label class="labelInverted">New extension: </label>
+                <input type="text" id="changeExtension" class="modificationOptionsInput" placeholder="e.g. .png, .jpg" onkeypress="this.style.width = ((this.value.length + 3) * 8) + 'px';">
+            </span>
+            <br>
+            <span class="checkbox">
+                <input type="checkbox" class="checkboxInput" id="toRemoveDoubleSpaces">
+                <p class="labelInverted label">Remove double spaces</p>
+            </span>
+            <span class="checkbox">
+                <input type="checkbox" class="checkboxInput" id="toAppendTodayDate">
+                <p class="labelInverted label">Append today's date</p>
+            </span>
+            <br><br>
+            <button type="button" class="invertedButton" id="saveCopiesButton">Save files as copies</button>
+            <button type="button" class="invertedButton" id="modifyOriginalButton">Modify original files</button>
+        </div>
+
+        <br><br>
+
+        <div class="filter">
+            <input type="text" id="regexFilter" placeholder="Filter using regex" onchange="listFiles()" onkeypress="this.style.width = ((this.value.length + 3) * 8) + 'px';">
+            <p id="filterInfo" class="info">Note: only filtered files will be modified</p>
+        </div>
+
+        <br>
+
+        <table id="fileTable">
+            <tbody id="fileTableBody"></tbody>
+        </table>
+
+        <br>
+
+        <script>
+            function listFiles() {
+                const selectedDirectory = document.getElementById('selectedDirectory').value;
+                if(selectedDirectory != "") {
+                    var regexString = document.getElementById("regexFilter").value;
+                    var toIncludeSubdirectories = document.getElementById("toIncludeSubdirectoriesCheckbox").checked;
+
+                    localStorage.setItem("selectedDirectory", selectedDirectory);
+                    fetch('/list_files', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({'selected_directory':selectedDirectory, 'regex_string_filter': regexString, 'to_include_subdirectories': toIncludeSubdirectories}),
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        displayFiles(data)
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                    });
+                }
+            }
+            
+            function displayFiles(data) {
+                const fileTableBody = document.getElementById('fileTableBody');
+                fileTableBody.innerHTML ="<thead><tr><th>File Name</th><th>Extension</th><th>Datetime Modified</th><th>Size</th></tr></thead>";
+                const columns = ["filename", "file_extension", "file_modified_dt", "file_size"];
+                
+                data.files.forEach(file => {
+                    const row = document.createElement('tr');
+                    for (col of columns) {
+                        const cell = document.createElement('td');
+                        cell.textContent = file[col];
+                        row.appendChild(cell);
+                    }
+                    fileTableBody.appendChild(row);
+                });
+
+                const makeVisible = ["regexFilter", "filterInfo", "saveCopiesButton", "modifyOriginalButton"];
+                for (element of makeVisible){
+                    document.getElementById(element).style.visibility = "visible";
+                }
+                toggleCollapsible();
+            }
+            
+            async function makeModifications(toModifyOriginal) {
+                var selectedDirectory = localStorage.getItem("selectedDirectory");
+                var toIncludeSubdirectories = document.getElementById("toIncludeSubdirectoriesCheckbox").checked;
+                var regexString = document.getElementById("regexFilter").value;
+
+                var newExtension = document.getElementById("changeExtension").value;
+                var toRemoveDoubleSpaces = document.getElementById("toRemoveDoubleSpaces").checked;
+                var toAppendTodayDate = document.getElementById("toAppendTodayDate").checked;
+                var regexFrom = document.getElementById("regexFrom").value;
+                var regexTo = document.getElementById("regexTo").value;
+                
+                const originalFilepaths = await fetch('/get_filepaths_json', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({'selected_directory':selectedDirectory, 'to_include_subdirectories': toIncludeSubdirectories, 'regex_string_filter': regexString}),
+                    })
+                    .catch(error => {
+                        console.error('Error:', error);
+                });
+                const originalFilepathsJson = await originalFilepaths.json();
+                let newFilepaths = originalFilepathsJson['filepaths'].slice();
+                const filepaths = await fetch('/regex_edit', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({'selected_directory':selectedDirectory, 'filepaths': newFilepaths, 'regex_from': regexFrom, 'regex_to': regexTo}),
+                });
+                const filepathsJson = await filepaths.json();
+                newFilepaths = filepathsJson['filepaths'];
+                if(newExtension != "") {
+                    const filepaths = await fetch('/change_file_extension', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({'selected_directory':selectedDirectory, 'filepaths': newFilepaths, 'regex_string_filter': regexString, 'new_extension': newExtension}),
+                    });
+                    const filepathsJson = await filepaths.json();
+                    newFilepaths = filepathsJson['filepaths'];
+                }
+                if(toRemoveDoubleSpaces) {
+                    const filepaths = await fetch('/remove_double_spaces', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({'selected_directory':selectedDirectory,  'filepaths': newFilepaths, 'to_include_subdirectories': toIncludeSubdirectories, 'regex_string_filter': regexString, 'to_modify_original': toModifyOriginal})
+                    });
+                    const filepathsJson = await filepaths.json();
+                    newFilepaths = filepathsJson['filepaths'];
+                }
+                if(toAppendTodayDate) {
+                    const filepaths = await fetch('/append_today_date', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({'selected_directory':selectedDirectory, 'filepaths': newFilepaths, 'to_include_subdirectories': toIncludeSubdirectories, 'regex_string_filter': regexString})
+                    })
+                    .catch(error => {
+                        console.error('Error:', error)
+                    });
+                    const filepathsJson = await filepaths.json();
+                    newFilepaths = filepathsJson['filepaths'];
+                }
+                await fetch('/apply_modifications', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({'selected_directory':selectedDirectory, 'to_modify_original': toModifyOriginal, 'original_filepaths': originalFilepathsJson['filepaths'], 'new_filepaths': newFilepaths}),
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                });
+                listFiles();
+            }
+
+            //event listener to toggle File Modifications Panel when button is clicked
+            var toggleCollapsibleBtn = document.getElementsByClassName("toggleCollapsible"); 
+          
+            toggleCollapsibleBtn[0].addEventListener("click", function () { 
+                this.classList.toggle("active"); 
+                var content = this.nextElementSibling; 
+                if (content.style.display === "block") { 
+                    content.style.display = "none"; 
+                    toggleCollapsibleBtn[0].textContent = "Show File Modification Options";
+                } else { 
+                    content.style.display = "block"; 
+                    toggleCollapsibleBtn[0].textContent="Hide File Modification Options";
+                } 
+            });
+
+            var saveCopiesBtn = document.getElementById("saveCopiesButton");
+            saveCopiesBtn.addEventListener("click", function () {
+                makeModifications(false);
+            });
+
+            var makeModificationsBtn = document.getElementById("modifyOriginalButton");
+            makeModificationsBtn.addEventListener("click", function () {
+                makeModifications(true);
+            })
+
+        </script>
+    </div>
+</body>
